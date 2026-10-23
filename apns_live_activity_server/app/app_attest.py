@@ -89,15 +89,18 @@ def _authenticator_data(value: bytes, *, attestation: bool) -> dict[str, Any]:
     return result
 
 
-def _check_extensions(extensions: dict[str, Any] | None) -> tuple[int | None, str | None]:
+def _check_extensions(
+    extensions: dict[str, Any] | None, environment: str
+) -> tuple[int | None, str | None]:
     if not extensions:
         return None, None
     category = extensions.get(APPLE_VALIDATION_CATEGORY)
     bundle_version = extensions.get(APPLE_BUNDLE_VERSION)
+    allowed_categories = {3} if environment == "development" else {2, 4, 5}
     if category is not None and (
-        not isinstance(category, int) or isinstance(category, bool) or category not in {2, 3, 4, 5}
+        not isinstance(category, int) or isinstance(category, bool) or category not in allowed_categories
     ):
-        raise ValueError("app validation category is not a supported iOS distribution")
+        raise ValueError("app validation category is not allowed for the configured environment")
     if bundle_version is not None and not isinstance(bundle_version, str):
         raise ValueError("app bundle version extension is invalid")
     return category, bundle_version
@@ -240,7 +243,7 @@ class AppAttestVerifier:
                 raise ValueError("attestation nonce extension is invalid")
             if _der_octet_string(nonce_extension.value) != nonce:
                 raise ValueError("attestation challenge does not match")
-            category, bundle_version = _check_extensions(parsed.get("extensions"))
+            category, bundle_version = _check_extensions(parsed.get("extensions"), self.environment)
             public_der = public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
             return VerifiedAttestation(public_der, self.app_id, self.environment, category, bundle_version)
         except Exception as exc:
@@ -265,9 +268,7 @@ class AppAttestVerifier:
                 raise ValueError("App Attest application identifier mismatch")
             if parsed["counter"] <= previous_counter:
                 raise ValueError("App Attest assertion counter did not increase")
-            category, _ = _check_extensions(parsed.get("extensions"))
-            if category is not None and category != 1:
-                raise ValueError("app validation category is not an OS-distributed app")
+            _check_extensions(parsed.get("extensions"), self.environment)
             public_key = serialization.load_der_public_key(stored_public_key)
             if not isinstance(public_key, ec.EllipticCurvePublicKey):
                 raise ValueError("stored App Attest key is invalid")
