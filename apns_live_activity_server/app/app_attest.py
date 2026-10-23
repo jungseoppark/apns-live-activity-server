@@ -94,8 +94,10 @@ def _check_extensions(extensions: dict[str, Any] | None) -> tuple[int | None, st
         return None, None
     category = extensions.get(APPLE_VALIDATION_CATEGORY)
     bundle_version = extensions.get(APPLE_BUNDLE_VERSION)
-    if category is not None and (not isinstance(category, int) or isinstance(category, bool) or category != 1):
-        raise ValueError("app validation category is not an OS-distributed app")
+    if category is not None and (
+        not isinstance(category, int) or isinstance(category, bool) or category not in {2, 3, 4, 5}
+    ):
+        raise ValueError("app validation category is not a supported iOS distribution")
     if bundle_version is not None and not isinstance(bundle_version, str):
         raise ValueError("app bundle version extension is invalid")
     return category, bundle_version
