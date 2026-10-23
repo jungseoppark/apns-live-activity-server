@@ -74,6 +74,14 @@ def test_validation_categories_follow_app_attest_environment():
             _check_extensions({"apple_validation_category_01": category}, "development")
 
     assert _check_extensions({"apple_validation_category_01": 3}, "development") == (3, None)
+    raw_development_category = b"\x03\x00\x00\x00"
+    assert _check_extensions({"apple_validation_category_01": raw_development_category}, "development") == (3, None)
+    with pytest.raises(ValueError):
+        _check_extensions({"apple_validation_category_01": raw_development_category}, "production")
+    for malformed in (b"\x03", b"\x03\x00\x00\x00\x00"):
+        with pytest.raises(ValueError):
+            _check_extensions({"apple_validation_category_01": malformed}, "development")
+
     with pytest.raises(ValueError):
         _check_extensions({"apple_validation_category_01": 3}, "production")
 
