@@ -138,13 +138,16 @@ def _verify_certificate_chain(certificates: list[bytes], root: x509.Certificate)
 
 
 def _der_octet_string(value: bytes) -> bytes:
-    """Read Apple's nonce extension: a DER SEQUENCE containing one OCTET STRING."""
-    if len(value) < 4 or value[0] != 0x30:
+    """Read Apple's nonce from SEQUENCE -> [1] -> OCTET STRING."""
+    if len(value) < 6 or value[0] != 0x30:
         raise ValueError("attestation nonce extension is malformed")
-    sequence_length, offset = _der_length(value, 1)
-    if offset + sequence_length != len(value) or value[offset] != 0x04:
+    sequence_length, sequence_offset = _der_length(value, 1)
+    if sequence_offset + sequence_length != len(value) or value[sequence_offset] != 0xA1:
         raise ValueError("attestation nonce extension is malformed")
-    octet_length, octet_offset = _der_length(value, offset + 1)
+    tagged_length, tagged_offset = _der_length(value, sequence_offset + 1)
+    if tagged_offset + tagged_length != len(value) or value[tagged_offset] != 0x04:
+        raise ValueError("attestation nonce extension is malformed")
+    octet_length, octet_offset = _der_length(value, tagged_offset + 1)
     if octet_offset + octet_length != len(value):
         raise ValueError("attestation nonce extension is malformed")
     return value[octet_offset:]
