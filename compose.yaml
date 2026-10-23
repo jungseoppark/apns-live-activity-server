@@ -3,8 +3,6 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "${PORT:-8000}:8000"
     volumes:
       - apns-data:/data
       - ./secrets:/run/secrets:ro
@@ -15,6 +13,24 @@ services:
       retries: 3
       start_period: 10s
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env to your DDNS hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      apns-api:
+        condition: service_healthy
+
 volumes:
   apns-data:
-
+  caddy-data:
+  caddy-config:

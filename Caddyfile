@@ -1,0 +1,5 @@
+{$PUBLIC_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy apns-api:8000
+}
+

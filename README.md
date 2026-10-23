@@ -27,6 +27,14 @@ curl http://localhost:8000/health
 
 The API requires `Authorization: Bearer <API_KEY>` when `API_KEY` is non-empty. Configure a reverse proxy with TLS and firewall the application port from public access where possible. SQLite token data persists in the `apns-data` Docker volume. `sandbox` requests use `api.sandbox.push.apple.com`; `production` requests use `api.push.apple.com`. Environments are separate in token storage; the caller must select the environment matching the token issued by iOS.
 
+### Expose a home test server with DDNS and HTTPS
+
+The Compose setup includes Caddy as an HTTPS reverse proxy. Set `PUBLIC_DOMAIN` in `.env` to your complete DDNS hostname (for example, `myhost.ddnsfree.com`). Keep the API container private; only Caddy listens on ports 80 and 443. The router must forward inbound TCP 80 and 443 to the host running Docker. Caddy obtains and renews a TLS certificate automatically when the hostname resolves to your public IP and those ports are reachable.
+
+Configure the DDNS updater to keep the hostname pointed at your current public IP, assign the Docker host a stable LAN IP, then forward TCP ports 80 and 443 to it. Check that your router has a public WAN address; if the WAN address is private or in `100.64.0.0/10`, your ISP may use CGNAT and direct port forwarding will not work. In that case use a tunnel or request a public IP from the ISP. Once DNS and forwarding are ready, run `docker compose up -d --build` and check `docker compose logs -f caddy`. Do not forward port 8000 directly.
+
+This is suitable for controlled testing. Do not embed the shared `API_KEY` in an iOS app; production token registration should be authenticated through your app's backend or an app-user authentication scheme.
+
 ## API
 
 All JSON APIs require the bearer header when configured. Tokens are stored by `(user_id, token_type, environment)`, so registering a refreshed token replaces that user's token for that environment. Tokens are never written to logs.
@@ -101,4 +109,3 @@ pytest -q
 ```
 
 Tests mock APNs and exercise registration, environment isolation, and all three event endpoints. They do not require Apple credentials or make network requests.
-

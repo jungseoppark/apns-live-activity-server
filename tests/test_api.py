@@ -24,6 +24,7 @@ async def request(app, method, path, **kwargs):
 
 def test_token_register_and_activity_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "tokens.db"))
+    monkeypatch.setattr(main.settings, "api_key", "")
     async def run():
         main.app.state.store = main.TokenStore(main.settings.database_path)
         fake = FakeAPNS()
@@ -51,6 +52,7 @@ def test_token_register_and_activity_lifecycle(tmp_path, monkeypatch):
 
 def test_environment_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "tokens.db"))
+    monkeypatch.setattr(main.settings, "api_key", "")
     async def run():
         main.app.state.store = main.TokenStore(main.settings.database_path)
         response = await request(main.app, "POST", "/api/live-activity/start", json={"user_id": "missing",
