@@ -67,13 +67,20 @@ def _test_attestation(tmp_path, challenge: bytes):
     return verifier, key_id, cbor2.dumps(statement), attested_key, authenticator_data
 
 
-def test_ios_validation_categories_are_accepted():
-    for category in (2, 3, 4, 5):
-        assert _check_extensions({"apple_validation_category_01": category}) == (category, None)
+def test_validation_categories_follow_app_attest_environment():
+    for category in (2, 4, 5):
+        assert _check_extensions({"apple_validation_category_01": category}, "production") == (category, None)
+        with pytest.raises(ValueError):
+            _check_extensions({"apple_validation_category_01": category}, "development")
+
+    assert _check_extensions({"apple_validation_category_01": 3}, "development") == (3, None)
+    with pytest.raises(ValueError):
+        _check_extensions({"apple_validation_category_01": 3}, "production")
 
     for category in (0, 1, 6, 7, 8, 9, 10, True):
-        with pytest.raises(ValueError):
-            _check_extensions({"apple_validation_category_01": category})
+        for environment in ("development", "production"):
+            with pytest.raises(ValueError):
+                _check_extensions({"apple_validation_category_01": category}, environment)
 
 
 def test_attestation_certificate_nonce_app_id_and_key_are_verified(tmp_path):
