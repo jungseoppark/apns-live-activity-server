@@ -1,0 +1,25 @@
+name: APNs Live Activity Server
+slug: apns_live_activity_server
+version: "1.0.0"
+description: APNs Push-to-Start and Live Activity API
+arch:
+  - amd64
+startup: services
+boot: auto
+init: false
+ports:
+  8000/tcp: 8000
+map:
+  - type: app_config
+    read_only: true
+options:
+  apns_timeout_seconds: 10
+  log_level: INFO
+schema:
+  apns_team_id: str(10,10)
+  apns_key_id: str(10,10)
+  apns_bundle_id: str(1,)
+  api_key: password(32,)
+  apns_timeout_seconds: int(1,60)
+  log_level: list(DEBUG|INFO|WARNING|ERROR)
+

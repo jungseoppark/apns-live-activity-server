@@ -27,6 +27,19 @@ curl http://localhost:8000/health
 
 The API requires `Authorization: Bearer <API_KEY>` when `API_KEY` is non-empty. Configure a reverse proxy with TLS and firewall the application port from public access where possible. SQLite token data persists in the `apns-data` Docker volume. `sandbox` requests use `api.sandbox.push.apple.com`; `production` requests use `api.push.apple.com`. Environments are separate in token storage; the caller must select the environment matching the token issued by iOS.
 
+## Install on Home Assistant OS
+
+HAOS uses Supervisor-managed apps (formerly add-ons), not the standalone Compose deployment. This repository includes a local app build for the NUC's `amd64` architecture and Python 3.12.
+
+1. Install the Home Assistant **Samba share** app or **Terminal & SSH** app if needed.
+2. Copy only `config.yaml`, `Dockerfile.amd64`, `run.sh`, `requirements.txt`, and the `app/` folder into `local_apps/apns_live_activity_server`. Do not copy `.env`, `.p8` files, `.venv`, or the Compose Caddy configuration.
+3. Copy the Apple key to `app_configs/local_apns_live_activity_server/AuthKey.p8`. This is the app's private configuration directory; do not put the key in a GitHub repository or a public share. The app mounts this directory read-only at `/config`.
+4. In Home Assistant, open **Settings → Apps → Install app**, refresh/check for updates, then install **APNs Live Activity Server** under **Local apps**.
+5. Open the app's Configuration tab and enter the Team ID, Key ID, Bundle ID, and a long random API key (at least 32 characters). Save, then start the app.
+6. Check `http://<HOME_ASSISTANT_LAN_IP>:8000/health`. If port 8000 is already taken, change the host port in the app's network/port settings and use that port in the URL.
+
+The app stores its SQLite database in its persistent `/data` directory. Its API is HTTP on the local network in this setup. For access from outside your home, route a hostname through your existing HTTPS reverse proxy to the add-on's host port; do not expose the API over plain HTTP. The app uses the Home Assistant base Python 3.12 image and is limited to `amd64` devices.
+
 ### Expose a home test server with DDNS and HTTPS
 
 The Compose setup includes Caddy as an HTTPS reverse proxy. Set `PUBLIC_DOMAIN` in `.env` to your complete DDNS hostname (for example, `myhost.ddnsfree.com`). Keep the API container private; only Caddy listens on ports 80 and 443. The router must forward inbound TCP 80 and 443 to the host running Docker. Caddy obtains and renews a TLS certificate automatically when the hostname resolves to your public IP and those ports are reachable.
