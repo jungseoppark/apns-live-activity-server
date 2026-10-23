@@ -1,6 +1,6 @@
 name: APNs Live Activity Server
 slug: apns_live_activity_server
-version: "1.1.0"
+version: "1.2.0"
 description: APNs Push-to-Start and Live Activity API
 arch:
   - amd64
@@ -19,6 +19,7 @@ options:
   app_attest_challenge_ttl_seconds: 300
   apns_timeout_seconds: 10
   log_level: INFO
+  additional_bundle_ids: ""
 schema:
   app_attest_enabled: bool
   app_attest_environment: list(development|production)
@@ -27,6 +28,7 @@ schema:
   apns_team_id: str(10,10)
   apns_key_id: str(10,10)
   apns_bundle_id: str(1,)
+  additional_bundle_ids: str
   api_key: password(32,)
   apns_timeout_seconds: int(1,60)
   log_level: list(DEBUG|INFO|WARNING|ERROR)

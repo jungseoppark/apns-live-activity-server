@@ -8,17 +8,19 @@ FastAPI service for registering ActivityKit tokens and sending Live Activity eve
 - `api_key`: server-to-server bearer credential. Keep it private; do not embed it in an iOS app.
 - `app_attest_enabled`: enables anonymous iOS app authentication with Apple App Attest. API-key callers remain supported.
 - `app_attest_environment`: `development` for development-signed builds and `production` for App Store/TestFlight builds.
-- `app_attest_app_id`: optional App ID prefix and bundle identifier, usually `TeamID.BundleID`. Leave empty to use the configured APNs Team ID and Bundle ID.
+- `app_attest_app_id`: optional App ID in `TeamID.BundleID` form. When multiple apps are configured, its prefix is reused with every Bundle ID. Leave empty to use the APNs Team ID as the prefix.
 - `app_attest_challenge_ttl_seconds`: one-time challenge lifetime, from 60 to 900 seconds.
 
 Place the APNs key file at `/config/AuthKey.p8`. The app stores token and App Attest state in its persistent `/data` directory.
 
 When replacing a local app install with this repository version, stop the local app before starting this one because both default to host port 8000. Copy the `.p8` key into this repository app's own `app_config` folder; app configuration folders are separated by repository and app ID.
 
+For more than one app, configure `additional_bundle_ids` as a comma-separated list of Bundle IDs owned by the same Apple Developer team. All apps share the Team ID, Key ID, and `.p8` provider key. Include the target `bundle_id` on requests for non-primary apps. APNs topics, token records, and App Attest identities are separated by Bundle ID. Existing database records migrate to the primary Bundle ID on upgrade.
+
 ## App Attest client flow
 
 1. On first launch, generate an App Attest key on the device and retain its key ID in the iOS Keychain.
-2. Request `POST /api/app-attest/challenge` with `{"purpose":"attestation","key_id":"<key-id>"}`.
+2. Request `POST /api/app-attest/challenge` with `{"purpose":"attestation","key_id":"<key-id>","bundle_id":"com.example.app"}`. Omit `bundle_id` for the primary app.
 3. Hash the decoded challenge with SHA-256 and call `DCAppAttestService.attestKey`. Send the base64 attestation object, key ID, and challenge ID to `POST /api/app-attest/attest`.
 4. Save the returned `installation_id` locally. No user account is created.
 5. Before each protected API request, request a fresh challenge with purpose `assertion` and the registered key ID. Serialize the API request body once as UTF-8 JSON bytes. Compute `clientDataHash = SHA256(decodedChallenge || exactRequestBodyBytes)`, then create an assertion with `DCAppAttestService.generateAssertion`.
@@ -26,6 +28,8 @@ When replacing a local app install with this repository version, stop the local 
 7. For `/api/token/register`, omit `user_id`; the server associates the token with the attested `installation_id`. Set `token_type` to `push_to_start` or `activity`, and `environment` to `sandbox` or `production` according to the APNs token.
 
 The server checks Apple's App Attest certificate chain and nonce, app identifier, environment, credential key, assertion signature, request challenge, and increasing counter. Each challenge is single-use and expires. Re-register refreshed tokens with another assertion.
+
+Include the same `bundle_id` in App Attest challenges and in the signed API request body. The server binds each attested key to its verified app.
 
 ## Dual authentication
 

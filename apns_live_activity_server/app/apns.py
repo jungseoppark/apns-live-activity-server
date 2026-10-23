@@ -38,11 +38,20 @@ class APNSClient:
         return self._jwt
 
     async def send(self, token: str, environment: str, payload: dict[str, Any], event: str,
-                   timestamp: int | None = None, priority: int = 10):
+                   timestamp: int | None = None, priority: int = 10,
+                   bundle_id: str | None = None):
+        return await self.send_for_bundle(
+            token, environment, payload, event, bundle_id or self.settings.apns_bundle_id,
+            timestamp, priority,
+        )
+
+    async def send_for_bundle(self, token: str, environment: str, payload: dict[str, Any],
+                              event: str, bundle_id: str,
+                              timestamp: int | None = None, priority: int = 10):
         host = APNS_HOSTS[environment]
         headers = {
             "authorization": f"bearer {self._provider_token()}",
-            "apns-topic": f"{self.settings.apns_bundle_id}.push-type.liveactivity",
+            "apns-topic": f"{bundle_id}.push-type.liveactivity",
             "apns-push-type": "liveactivity",
             "apns-priority": str(priority),
         }

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     apns_team_id: str = ""
     apns_key_id: str = ""
     apns_bundle_id: str = ""
+    additional_bundle_ids: str = ""
     apns_private_key_path: str = ""
     apns_private_key: str = ""
     database_path: str = "/data/apns.db"
@@ -35,6 +36,20 @@ class Settings(BaseSettings):
         if self.app_attest_app_id:
             return self.app_attest_app_id
         return f"{self.apns_team_id}.{self.apns_bundle_id}"
+
+    @property
+    def bundle_ids(self) -> tuple[str, ...]:
+        values = [self.apns_bundle_id, *self.additional_bundle_ids.split(",")]
+        return tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+    @property
+    def app_attest_app_id_prefix(self) -> str:
+        if self.app_attest_app_id:
+            return self.app_attest_app_id.partition(".")[0]
+        return self.apns_team_id
+
+    def app_id_for_bundle(self, bundle_id: str) -> str:
+        return f"{self.app_attest_app_id_prefix}.{bundle_id}"
 
 
 @lru_cache

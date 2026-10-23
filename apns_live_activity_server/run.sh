@@ -3,6 +3,7 @@
 export APNS_TEAM_ID="$(bashio::config 'apns_team_id')"
 export APNS_KEY_ID="$(bashio::config 'apns_key_id')"
 export APNS_BUNDLE_ID="$(bashio::config 'apns_bundle_id')"
+export ADDITIONAL_BUNDLE_IDS="$(bashio::config 'additional_bundle_ids')"
 export APNS_PRIVATE_KEY_PATH="/config/AuthKey.p8"
 export DATABASE_PATH="/data/apns.db"
 export API_KEY="$(bashio::config 'api_key')"

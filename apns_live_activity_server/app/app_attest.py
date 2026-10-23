@@ -275,67 +275,138 @@ class AppAttestService:
     def __init__(self, settings: Any, store: TokenStore):
         self.settings = settings
         self.store = store
-        self.verifier: AppAttestVerifier | None = None
+        self.verifiers: dict[str, AppAttestVerifier] = {}
+        fallback_app_id = getattr(settings, "resolved_app_attest_app_id", "")
+        self.primary_bundle_id = getattr(settings, "apns_bundle_id", "") or (
+            fallback_app_id.partition(".")[2] if "." in fallback_app_id else ""
+        )
         if settings.app_attest_enabled:
-            app_id = settings.resolved_app_attest_app_id
-            if not app_id or app_id.startswith(".") or app_id.endswith("."):
-                raise RuntimeError("App Attest requires a valid APP_ATTEST_APP_ID or APNs Team ID and Bundle ID")
             if settings.app_attest_environment not in {"development", "production"}:
                 raise RuntimeError("APP_ATTEST_ENVIRONMENT must be development or production")
-            self.verifier = AppAttestVerifier(app_id, settings.app_attest_environment,
-                                              settings.app_attest_root_certificate_path or None)
+            bundle_ids = getattr(settings, "bundle_ids", (self.primary_bundle_id,))
+            for bundle_id in bundle_ids:
+                if hasattr(settings, "app_id_for_bundle"):
+                    app_id = settings.app_id_for_bundle(bundle_id)
+                elif bundle_id == self.primary_bundle_id and fallback_app_id:
+                    app_id = fallback_app_id
+                else:
+                    app_id = f"{getattr(settings, 'apns_team_id', '')}.{bundle_id}"
+                if not app_id or app_id.startswith(".") or app_id.endswith("."):
+                    raise RuntimeError("App Attest requires an App ID prefix and Bundle ID")
+                self.verifiers[bundle_id] = AppAttestVerifier(
+                    app_id,
+                    settings.app_attest_environment,
+                    getattr(settings, "app_attest_root_certificate_path", "") or None,
+                )
 
-    def issue_challenge(self, purpose: str, key_id: str | None = None) -> dict[str, str]:
-        if self.verifier is None:
-            raise HTTPException(status_code=404, detail="App Attest is disabled")
+    def issue_challenge(
+        self, purpose: str, key_id: str | None = None, bundle_id: str | None = None
+    ) -> dict[str, str]:
+        bundle_id = bundle_id or self.primary_bundle_id
+        if bundle_id not in self.verifiers:
+            raise HTTPException(status_code=404, detail="App Attest is disabled for this app")
         if purpose not in {"attestation", "assertion"}:
             raise HTTPException(status_code=422, detail="purpose must be attestation or assertion")
         if not key_id or len(key_id) != 64 or any(char not in "0123456789abcdefABCDEF" for char in key_id):
             raise HTTPException(status_code=422, detail="key_id must be a 32-byte hexadecimal key ID")
         key_id = key_id.lower()
+        existing_key = self.store.get_attested_key(key_id)
         if purpose == "assertion":
-            if not self.store.get_attested_key(key_id):
+            if not existing_key:
                 raise HTTPException(status_code=401, detail="App Attest key is not registered")
-        elif self.store.get_attested_key(key_id):
+            if existing_key["bundle_id"] != bundle_id:
+                raise HTTPException(status_code=403, detail="App Attest key belongs to another app")
+        elif existing_key:
             raise HTTPException(status_code=409, detail="App Attest key is already registered")
-        raw_challenge = secrets.token_bytes(32)
-        challenge_id = b64url_encode(secrets.token_bytes(24))
-        challenge_text = b64_encode(raw_challenge)
-        self.store.create_attest_challenge(challenge_id, challenge_text, purpose, key_id,
-                                           int(time.time()), self.settings.app_attest_challenge_ttl_seconds)
-        return {"challenge_id": challenge_id, "challenge": challenge_text}
 
-    def register_key(self, key_id: str, challenge_id: str, attestation: bytes) -> dict[str, str]:
-        if self.verifier is None:
-            raise HTTPException(status_code=404, detail="App Attest is disabled")
+        challenge = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+        challenge_id = b64url_encode(secrets.token_bytes(24))
+        self.store.create_attest_challenge(
+            challenge_id,
+            challenge,
+            purpose,
+            key_id,
+            int(time.time()),
+            self.settings.app_attest_challenge_ttl_seconds,
+            bundle_id,
+        )
+        return {
+            "challenge_id": challenge_id,
+            "challenge": challenge,
+            "purpose": purpose,
+            "bundle_id": bundle_id,
+        }
+
+    def register_key(
+        self, key_id: str, challenge_id: str, attestation: bytes,
+        bundle_id: str | None = None,
+    ) -> dict[str, str]:
         if len(key_id) != 64 or any(char not in "0123456789abcdefABCDEF" for char in key_id):
             raise HTTPException(status_code=422, detail="key_id must be a 32-byte hexadecimal key ID")
         key_id = key_id.lower()
-        challenge = self.store.consume_attest_challenge(challenge_id, "attestation", key_id, int(time.time()))
+        challenge = self.store.consume_attest_challenge_record(
+            challenge_id, "attestation", key_id, int(time.time()), bundle_id
+        )
         if challenge is None:
             raise HTTPException(status_code=401, detail="App Attest challenge is invalid or expired")
-        verified = self.verifier.verify_attestation(key_id, attestation, base64.b64decode(challenge, validate=True))
-        installation_id = b64url_encode(secrets.token_bytes(24))
-        self.store.register_attested_key(key_id.lower(), installation_id, verified.public_key, 0,
-                                         verified.environment, verified.validation_category,
-                                         verified.bundle_version)
-        logger.info("App Attest key registered environment=%s", verified.environment)
-        return {"status": "attested", "installation_id": installation_id,
-                "environment": verified.environment}
+        bundle_id = challenge["bundle_id"]
+        verifier = self.verifiers.get(bundle_id)
+        if verifier is None:
+            raise HTTPException(status_code=404, detail="App Attest is disabled for this app")
+        try:
+            challenge_bytes = base64.b64decode(challenge["challenge"], validate=True)
+            verified = verifier.verify_attestation(key_id, attestation, challenge_bytes)
+        except Exception as exc:
+            logger.info("App Attest attestation rejected error_type=%s", type(exc).__name__)
+            raise HTTPException(status_code=401, detail="App Attest attestation was rejected") from exc
 
-    def verify_request(self, key_id: str, challenge_id: str, assertion: bytes,
-                       request_body: bytes) -> str:
-        if self.verifier is None:
-            raise HTTPException(status_code=401, detail="App Attest is disabled")
+        installation_id = b64url_encode(secrets.token_bytes(24))
+        self.store.register_attested_key(
+            key_id,
+            installation_id,
+            verified.public_key,
+            0,
+            verified.environment,
+            verified.validation_category,
+            verified.bundle_version,
+            bundle_id,
+        )
+        logger.info("App Attest key registered environment=%s", verified.environment)
+        return {
+            "status": "attested",
+            "installation_id": installation_id,
+            "key_id": key_id,
+            "environment": verified.environment,
+            "bundle_id": bundle_id,
+        }
+
+    def verify_request(
+        self, key_id: str, challenge_id: str, assertion: bytes, request_body: bytes
+    ) -> tuple[str, str]:
         key = self.store.get_attested_key(key_id.lower())
         if key is None:
             raise HTTPException(status_code=401, detail="App Attest key is not registered")
-        challenge = self.store.consume_attest_challenge(challenge_id, "assertion", key_id.lower(), int(time.time()))
+        bundle_id = str(key["bundle_id"])
+        verifier = self.verifiers.get(bundle_id)
+        if verifier is None:
+            raise HTTPException(status_code=401, detail="App Attest is disabled for this app")
+        challenge = self.store.consume_attest_challenge_record(
+            challenge_id, "assertion", key_id.lower(), int(time.time()), bundle_id
+        )
         if challenge is None:
             raise HTTPException(status_code=401, detail="App Attest challenge is invalid or expired")
-        challenge_bytes = base64.b64decode(challenge, validate=True)
-        counter = self.verifier.verify_assertion(key_id, assertion, challenge_bytes + request_body,
-                                                key["public_key"], key["sign_count"])
+        try:
+            challenge_bytes = base64.b64decode(challenge["challenge"], validate=True)
+            counter = verifier.verify_assertion(
+                key_id,
+                assertion,
+                challenge_bytes + request_body,
+                key["public_key"],
+                key["sign_count"],
+            )
+        except Exception as exc:
+            logger.info("App Attest assertion rejected error_type=%s", type(exc).__name__)
+            raise HTTPException(status_code=401, detail="App Attest assertion was rejected") from exc
         if not self.store.advance_attest_counter(key_id.lower(), key["sign_count"], counter):
             raise HTTPException(status_code=401, detail="App Attest assertion was already used")
-        return key["installation_id"]
+        return str(key["installation_id"]), bundle_id

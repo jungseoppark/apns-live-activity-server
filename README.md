@@ -121,6 +121,10 @@ Use the same body at `POST /api/live-activity/end` to end the activity; it sends
 
 The server sends `apns-push-type: liveactivity`, topic `<Bundle ID>.push-type.liveactivity`, and an ES256 provider JWT signed with the `.p8` key. JWTs are reused for up to 50 minutes. The ActivityKit event payload is placed under `aps`; `start` includes `attributes-type`, `attributes`, and `content-state`. See [Apple's ActivityKit push notification guide](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications) and [APNs request requirements](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns).
 
+## Multiple apps
+
+One server can serve multiple apps owned by the same Apple Developer team. Set the primary `apns_bundle_id` and list additional IDs in the Home Assistant app's comma-separated `additional_bundle_ids` option. All apps share the configured Team ID, Key ID, and `.p8` provider key. Include the target `bundle_id` in token registration and Live Activity start, update, and end requests for every non-primary app. App Attest challenges use that same Bundle ID; token records and App Attest identities are isolated by app.
+
 ## Tests
 
 ```bash
