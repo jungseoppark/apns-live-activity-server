@@ -132,3 +132,9 @@ pytest -q
 ```
 
 Tests mock APNs and exercise registration, environment isolation, and all three event endpoints. They do not require Apple credentials or make network requests.
+
+## License
+
+The project is licensed under the [MIT License](LICENSE). See
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for notices about Python
+dependencies and the Apple App Attestation root certificate.

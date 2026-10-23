@@ -2,6 +2,8 @@
 *.p8
 AuthKey.p8
 *.db
+*.swp
+/haos-local-app.zip
 __pycache__/
 .pytest_cache/
 .venv/
