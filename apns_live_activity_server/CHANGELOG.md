@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.8
+
+- Verify App Attest assertions with ECDSA-SHA256 over the calculated nonce.
+
 ## 1.2.7
 
 - Add development-only fingerprints to diagnose App Attest assertion signature mismatches.

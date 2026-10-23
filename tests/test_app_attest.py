@@ -6,7 +6,6 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.x509.oid import NameOID, ObjectIdentifier
 from fastapi import HTTPException
 
@@ -110,7 +109,7 @@ def test_assertion_signature_and_counter_are_verified(tmp_path):
                            + (1).to_bytes(4, "big"))
     client_data_hash = hashlib.sha256(request_data).digest()
     nonce = hashlib.sha256(assertion_auth_data + client_data_hash).digest()
-    signature = key.sign(nonce, ec.ECDSA(Prehashed(hashes.SHA256())))
+    signature = key.sign(nonce, ec.ECDSA(hashes.SHA256()))
     assertion = cbor2.dumps({"authenticatorData": assertion_auth_data, "signature": signature})
     public_key = key.public_key().public_bytes(serialization.Encoding.DER,
                                                serialization.PublicFormat.SubjectPublicKeyInfo)

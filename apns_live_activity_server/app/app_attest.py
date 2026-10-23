@@ -16,7 +16,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
-from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import HTTPException
 
@@ -280,7 +279,7 @@ class AppAttestVerifier:
             if not isinstance(public_key, ec.EllipticCurvePublicKey):
                 raise ValueError("stored App Attest key is invalid")
             nonce = hashlib.sha256(auth_data + client_data_hash).digest()
-            public_key.verify(signature, nonce, ec.ECDSA(Prehashed(hashes.SHA256())))
+            public_key.verify(signature, nonce, ec.ECDSA(hashes.SHA256()))
             return parsed["counter"]
         except Exception as exc:
             if isinstance(exc, InvalidSignature) and auth_data is not None and self.environment == "development":
