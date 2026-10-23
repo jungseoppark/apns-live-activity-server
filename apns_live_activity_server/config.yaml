@@ -1,9 +1,6 @@
 name: APNs Live Activity Server
 slug: apns_live_activity_server
 version: "1.2.4"
-changelog:
-  "1.2.4": >-
-    Development App Attest now accepts apps signed with a development identity. Production accepts TestFlight, App Store, and enterprise or ad hoc distribution only.
 description: APNs Push-to-Start and Live Activity API
 arch:
   - amd64
