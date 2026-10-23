@@ -100,7 +100,7 @@ def _check_extensions(
     if category is not None and (
         not isinstance(category, int) or isinstance(category, bool) or category not in allowed_categories
     ):
-        raise ValueError("app validation category is not allowed for the configured environment")
+        raise ValueError(f"app validation category {category} is not allowed for configured environment {environment}")
     if bundle_version is not None and not isinstance(bundle_version, str):
         raise ValueError("app bundle version extension is invalid")
     return category, bundle_version
