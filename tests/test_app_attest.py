@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.x509.oid import NameOID, ObjectIdentifier
 from fastapi import HTTPException
 
-from app.app_attest import AppAttestVerifier
+from app.app_attest import AppAttestVerifier, _check_extensions
 
 
 def _der_sequence_octet_string(value: bytes) -> bytes:
@@ -65,6 +65,15 @@ def _test_attestation(tmp_path, challenge: bytes):
                                      intermediate.public_bytes(serialization.Encoding.DER)]}}
     verifier = AppAttestVerifier(app_id, "development", str(root_path))
     return verifier, key_id, cbor2.dumps(statement), attested_key, authenticator_data
+
+
+def test_ios_validation_categories_are_accepted():
+    for category in (2, 3, 4, 5):
+        assert _check_extensions({"apple_validation_category_01": category}) == (category, None)
+
+    for category in (0, 1, 6, 7, 8, 9, 10, True):
+        with pytest.raises(ValueError):
+            _check_extensions({"apple_validation_category_01": category})
 
 
 def test_attestation_certificate_nonce_app_id_and_key_are_verified(tmp_path):
