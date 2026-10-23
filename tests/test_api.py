@@ -1,4 +1,5 @@
 import asyncio
+import base64
 
 import httpx
 
@@ -65,3 +66,46 @@ def test_health(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "health.db"))
     response = asyncio.run(request(main.app, "GET", "/health"))
     assert response.json() == {"status": "ok"}
+
+
+def test_app_attest_challenges_are_bound_and_single_use(tmp_path):
+    store = main.TokenStore(str(tmp_path / "attest.db"))
+    store.create_attest_challenge("challenge-1", "opaque", "attestation", "a" * 64, 100, 300)
+
+    assert store.consume_attest_challenge("challenge-1", "assertion", "a" * 64, 101) is None
+    assert store.consume_attest_challenge("challenge-1", "attestation", "a" * 64, 101) == "opaque"
+    assert store.consume_attest_challenge("challenge-1", "attestation", "a" * 64, 102) is None
+
+
+def test_api_key_and_app_attest_can_both_register_tokens(tmp_path, monkeypatch):
+    class FakeAppAttest:
+        def verify_request(self, key_id, challenge_id, assertion, request_body):
+            assert key_id == "a" * 64
+            assert challenge_id == "challenge-id"
+            assert assertion == b"test-assertion"
+            assert b'"token_type":"activity"' in request_body
+            return "anonymous-installation-1"
+
+    monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "dual-auth.db"))
+    monkeypatch.setattr(main.settings, "api_key", "test-api-key")
+
+    async def run():
+        store = main.TokenStore(main.settings.database_path)
+        main.app.state.store = store
+        main.app.state.app_attest = FakeAppAttest()
+
+        api_key_response = await request(main.app, "POST", "/api/token/register", headers={
+            "Authorization": "Bearer test-api-key"}, json={"user_id": "backend-user",
+            "token": "ab" * 32, "token_type": "push_to_start", "environment": "sandbox"})
+        assert api_key_response.status_code == 200
+
+        app_attest_response = await request(main.app, "POST", "/api/token/register", headers={
+            "X-App-Attest-Key-Id": "a" * 64,
+            "X-App-Attest-Challenge-Id": "challenge-id",
+            "X-App-Attest-Assertion": base64.b64encode(b"test-assertion").decode("ascii")}, json={
+                "token": "cd" * 32, "token_type": "activity", "environment": "sandbox"})
+        assert app_attest_response.status_code == 200
+        assert store.get("backend-user", "push_to_start", "sandbox") == "ab" * 32
+        assert store.get("anonymous-installation-1", "activity", "sandbox") == "cd" * 32
+
+    asyncio.run(run())

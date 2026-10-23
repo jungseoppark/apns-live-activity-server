@@ -27,18 +27,17 @@ curl http://localhost:8000/health
 
 The API requires `Authorization: Bearer <API_KEY>` when `API_KEY` is non-empty. Configure a reverse proxy with TLS and firewall the application port from public access where possible. SQLite token data persists in the `apns-data` Docker volume. `sandbox` requests use `api.sandbox.push.apple.com`; `production` requests use `api.push.apple.com`. Environments are separate in token storage; the caller must select the environment matching the token issued by iOS.
 
-## Install on Home Assistant OS
+## Install from the Home Assistant app repository
 
-HAOS uses Supervisor-managed apps (formerly add-ons), not the standalone Compose deployment. This repository includes a local app build for the NUC's `amd64` architecture and Python 3.12.
+The Home Assistant app is in `apns_live_activity_server/`. Add this Git repository in **Settings → Apps → Install app → ⋮ → Repositories**, then install **APNs Live Activity Server**. The app builds its Python 3.12 container on the HAOS host for `amd64` devices.
 
-1. Install the Home Assistant **Samba share** app or **Terminal & SSH** app if needed.
-2. Copy only `config.yaml`, `Dockerfile.amd64`, `run.sh`, `requirements.txt`, and the `app/` folder into `local_apps/apns_live_activity_server`. Do not copy `.env`, `.p8` files, `.venv`, or the Compose Caddy configuration.
-3. Copy the Apple key to `app_configs/local_apns_live_activity_server/AuthKey.p8`. This is the app's private configuration directory; do not put the key in a GitHub repository or a public share. The app mounts this directory read-only at `/config`.
-4. In Home Assistant, open **Settings → Apps → Install app**, refresh/check for updates, then install **APNs Live Activity Server** under **Local apps**.
-5. Open the app's Configuration tab and enter the Team ID, Key ID, Bundle ID, and a long random API key (at least 32 characters). Save, then start the app.
-6. Check `http://<HOME_ASSISTANT_LAN_IP>:8000/health`. If port 8000 is already taken, change the host port in the app's network/port settings and use that port in the URL.
+After installation, configure the Apple Team ID, Key ID, Bundle ID, API key, and App Attest options. Copy `AuthKey.p8` into the app's `app_configs/<repository-id>_apns_live_activity_server/` folder. The app mounts it read-only at `/config/AuthKey.p8` and stores SQLite data in its persistent `/data` directory.
 
-The app stores its SQLite database in its persistent `/data` directory. Its API is HTTP on the local network in this setup. For access from outside your home, route a hostname through your existing HTTPS reverse proxy to the add-on's host port; do not expose the API over plain HTTP. The app uses the Home Assistant base Python 3.12 image and is limited to `amd64` devices.
+The Git repository must be reachable by the Home Assistant host. Home Assistant's repository manager clones the Git URL directly, so a private GitHub repository is not accessible unless the host has authenticated Git credentials configured. Keep the Apple `.p8` key and `.env` out of Git.
+
+For App Attest, set the environment to `development` for development-signed builds or `production` for App Store/TestFlight builds. The configured App ID is usually `<Team ID>.<Bundle ID>`; override it only if the app's App ID prefix differs from the Team ID. App Attest clients authenticate with per-installation assertions; API-key authentication remains available for backend and manual calls.
+
+Check `http://<HOME_ASSISTANT_LAN_IP>:8000/health` on the local network. For external access, use an HTTPS reverse proxy to the app's host port; do not expose port 8000 directly.
 
 ### Expose a home test server with DDNS and HTTPS
 
@@ -50,7 +49,18 @@ This is suitable for controlled testing. Do not embed the shared `API_KEY` in an
 
 ## API
 
-All JSON APIs require the bearer header when configured. Tokens are stored by `(user_id, token_type, environment)`, so registering a refreshed token replaces that user's token for that environment. Tokens are never written to logs.
+Protected JSON APIs accept the bearer API key or, when enabled, a valid App Attest assertion. Tokens are stored by `(identity, token_type, environment)`: API-key callers supply `user_id`, while App Attest callers use a server-assigned installation ID. Registering a refreshed token replaces the token for that identity and environment. APNs tokens and installation IDs are not written to logs.
+
+### Anonymous iOS authentication with App Attest
+
+The Home Assistant app enables App Attest by default. It supports both App Attest assertions for accountless iOS clients and the existing bearer API key for backend/manual use. The iOS app must never embed the shared API key.
+
+- `POST /api/app-attest/challenge` with `{"purpose":"attestation","key_id":"<hex key ID>"}` starts key enrollment. Use purpose `assertion` with the same key ID for each protected API request.
+- `POST /api/app-attest/attest` verifies the one-time challenge, Apple certificate chain, key identifier, app ID, App Attest environment, and credential public key. The response includes a server-generated `installation_id`.
+- Protected requests carry `X-App-Attest-Key-Id`, `X-App-Attest-Challenge-Id`, and base64 `X-App-Attest-Assertion` headers. The assertion covers the decoded challenge concatenated with the exact UTF-8 JSON body bytes. Challenges expire and can be used once; assertion counters must increase.
+- In App Attest mode, omit `user_id`; the server associates the request with the attested installation. Register `push_to_start` and `activity` tokens separately. `sandbox`/`production` still refer to the APNs token environment, not the App Attest development/production environment.
+
+See [the Home Assistant app guide](apns_live_activity_server/DOCS.md) for the request sequence and configuration options.
 
 ### Register a token
 
