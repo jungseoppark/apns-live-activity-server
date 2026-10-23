@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.6
+
+- Decode Apple's four-byte little-endian App Attest validation category.
+
 ## 1.2.5
 
 - Include the rejected App Attest validation category and environment in safe server logs.
