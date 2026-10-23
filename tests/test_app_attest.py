@@ -70,7 +70,7 @@ def _test_attestation(tmp_path, challenge: bytes):
 def test_validation_categories_follow_app_attest_environment():
     for category in (2, 4, 5):
         assert _check_extensions({"apple_validation_category_01": category}, "production") == (category, None)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=f"category {category}.*development"):
             _check_extensions({"apple_validation_category_01": category}, "development")
 
     assert _check_extensions({"apple_validation_category_01": 3}, "development") == (3, None)
