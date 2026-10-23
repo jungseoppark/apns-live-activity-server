@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.9
+
+- Keep operational App Attest and token registration logs; remove temporary signature fingerprints and duplicate rejection logs.
+
 ## 1.2.8
 
 - Verify App Attest assertions with ECDSA-SHA256 over the calculated nonce.

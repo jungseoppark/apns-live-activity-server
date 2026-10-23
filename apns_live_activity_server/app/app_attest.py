@@ -282,11 +282,6 @@ class AppAttestVerifier:
             public_key.verify(signature, nonce, ec.ECDSA(hashes.SHA256()))
             return parsed["counter"]
         except Exception as exc:
-            if isinstance(exc, InvalidSignature) and auth_data is not None and self.environment == "development":
-                logger.info(
-                    "App Attest assertion signature mismatch key=%s client_data_hash=%s auth_data_hash=%s",
-                    key_id[:12], client_data_hash.hex()[:16], hashlib.sha256(auth_data).hexdigest()[:16],
-                )
             logger.info("App Attest assertion rejected error_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="App Attest assertion was rejected") from exc
 
@@ -377,7 +372,6 @@ class AppAttestService:
             challenge_bytes = base64.b64decode(challenge["challenge"], validate=True)
             verified = verifier.verify_attestation(key_id, attestation, challenge_bytes)
         except Exception as exc:
-            logger.info("App Attest attestation rejected error_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="App Attest attestation was rejected") from exc
 
         installation_id = b64url_encode(secrets.token_bytes(24))
