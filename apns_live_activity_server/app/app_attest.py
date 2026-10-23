@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import cbor2
+from cryptography.exceptions import InvalidSignature
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
@@ -260,6 +261,8 @@ class AppAttestVerifier:
 
     def verify_assertion(self, key_id: str, assertion: bytes, client_data: bytes,
                          stored_public_key: bytes, previous_counter: int) -> int:
+        client_data_hash = hashlib.sha256(client_data).digest()
+        auth_data = None
         try:
             obj = _decode_cbor(assertion)
             if not isinstance(obj, dict):
@@ -276,10 +279,15 @@ class AppAttestVerifier:
             public_key = serialization.load_der_public_key(stored_public_key)
             if not isinstance(public_key, ec.EllipticCurvePublicKey):
                 raise ValueError("stored App Attest key is invalid")
-            nonce = hashlib.sha256(auth_data + hashlib.sha256(client_data).digest()).digest()
+            nonce = hashlib.sha256(auth_data + client_data_hash).digest()
             public_key.verify(signature, nonce, ec.ECDSA(Prehashed(hashes.SHA256())))
             return parsed["counter"]
         except Exception as exc:
+            if isinstance(exc, InvalidSignature) and auth_data is not None and self.environment == "development":
+                logger.info(
+                    "App Attest assertion signature mismatch key=%s client_data_hash=%s auth_data_hash=%s",
+                    key_id[:12], client_data_hash.hex()[:16], hashlib.sha256(auth_data).hexdigest()[:16],
+                )
             logger.info("App Attest assertion rejected error_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="App Attest assertion was rejected") from exc
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.7
+
+- Add development-only fingerprints to diagnose App Attest assertion signature mismatches.
+
 ## 1.2.6
 
 - Decode Apple's four-byte little-endian App Attest validation category.
