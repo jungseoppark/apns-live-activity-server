@@ -239,8 +239,11 @@ class AppAttestVerifier:
             public_der = public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
             return VerifiedAttestation(public_der, self.app_id, self.environment, category, bundle_version)
         except Exception as exc:
-            # Normalize parser and cryptographic failures; callers must not learn key material.
-            logger.info("App Attest attestation rejected error_type=%s", type(exc).__name__)
+            # Log the validation reason without recording attestation, challenge, or key material.
+            logger.info(
+                "App Attest attestation rejected error_type=%s reason=%s app_id=%s environment=%s",
+                type(exc).__name__, str(exc)[:240], self.app_id, self.environment,
+            )
             raise HTTPException(status_code=401, detail="App Attest attestation was rejected") from exc
 
     def verify_assertion(self, key_id: str, assertion: bytes, client_data: bytes,
