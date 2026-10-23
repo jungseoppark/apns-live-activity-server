@@ -14,7 +14,7 @@ from app.app_attest import AppAttestVerifier
 
 
 def _der_sequence_octet_string(value: bytes) -> bytes:
-    return bytes((0x30, len(value) + 2, 0x04, len(value))) + value
+    return bytes((0x30, len(value) + 4, 0xA1, len(value) + 2, 0x04, len(value))) + value
 
 
 def _certificate(subject_name, issuer_name, public_key, issuer_key, *, is_ca: bool,
