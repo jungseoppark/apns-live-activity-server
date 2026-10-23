@@ -95,6 +95,10 @@ def _check_extensions(
     if not extensions:
         return None, None
     category = extensions.get(APPLE_VALIDATION_CATEGORY)
+    if isinstance(category, bytes):
+        if len(category) != 4:
+            raise ValueError("app validation category must be a four-byte UInt32")
+        category = int.from_bytes(category, "little")
     bundle_version = extensions.get(APPLE_BUNDLE_VERSION)
     allowed_categories = {3} if environment == "development" else {2, 4, 5}
     if category is not None and (
