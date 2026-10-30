@@ -1,6 +1,6 @@
 name: APNs Live Activity Server
 slug: apns_live_activity_server
-version: "1.2.9"
+version: "1.3.0"
 description: APNs Push-to-Start and Live Activity API
 arch:
   - amd64

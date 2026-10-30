@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+- Add application-agnostic scheduled Live Activity start, update, and end events with optional daily or weekly recurrence.
+
 ## 1.2.9
 
 - Keep operational App Attest and token registration logs; remove temporary signature fingerprints and duplicate rejection logs.
