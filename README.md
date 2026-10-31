@@ -98,6 +98,35 @@ POST /api/live-activity/start
 
 `timestamp` (Unix seconds) is optional and defaults to server time. The server sends event `start` to the registered Push-to-Start token. The client app must later register the resulting ActivityKit update token.
 
+### Schedule events
+
+`PUT /api/live-activity/schedules` creates or replaces a persistent schedule. The caller supplies an opaque `schedule_id`; schedules are isolated by authenticated installation/user and Bundle ID, so repeating the same request is idempotent. `run_at` is a Unix timestamp in UTC. The payload dictionaries are passed through to ActivityKit and are not tied to a particular app.
+
+```json
+{
+  "schedule_id": "morning-status",
+  "user_id": "user-123",
+  "bundle_id": "com.example.app",
+  "environment": "production",
+  "event": "start",
+  "run_at": 1793587800,
+  "recurrence": {
+    "frequency": "weekly",
+    "timezone": "Asia/Seoul",
+    "weekdays": [1, 2, 3, 4, 5]
+  },
+  "attributes_type": "OrderAttributes",
+  "attributes": {"orderId": "order-456"},
+  "content_state": {"status": "Preparing", "eta": "12:30"},
+  "alert": {"title": "Order update", "body": "Your order is being prepared"},
+  "priority": 10
+}
+```
+
+`recurrence` is optional. `frequency` supports `daily` or `weekly`; `interval` defaults to `1` (days or weeks), `weekdays` uses ISO weekday numbers (Monday `1` through Sunday `7`) for weekly rules, and `until` optionally sets the last occurrence as a UTC Unix timestamp. Each recurrence runs at the local wall-clock time represented by `run_at` in the selected IANA time zone. Repeating `end` events are rejected. `start` requires `attributes_type`, `attributes`, `content_state`, and a non-empty `alert`; `update` and `end` require `content_state`.
+
+Use `POST /api/live-activity/schedules/status` with `schedule_id` (and `user_id`/`bundle_id` for API-key callers) to read status. Use `POST /api/live-activity/schedules/cancel` with the same identity fields to cancel a pending schedule. A schedule currently being sent or already sent returns HTTP `409`. The server stores schedules in SQLite, retries transient failures, and advances repeating schedules after APNs accepts each event. `start` uses a registered `push_to_start` token; `update` and `end` use an `activity` token.
+
 ### Update and end
 
 Both endpoints require `user_id`, `environment`, and `content_state`. Optional fields are `alert`, `timestamp` and `priority` (`5` or `10`). End also accepts `dismissal_date` (Unix seconds).

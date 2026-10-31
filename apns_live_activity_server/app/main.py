@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import time
@@ -5,6 +6,7 @@ import base64
 import binascii
 from contextlib import asynccontextmanager
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -13,6 +15,7 @@ from .apns import APNSError, APNSClient
 from .app_attest import AppAttestService
 from .config import get_settings
 from .store import TokenStore
+from .schedules import ScheduledPushStore
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -22,13 +25,20 @@ logger = logging.getLogger("apns_api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.store = TokenStore(settings.database_path, settings.apns_bundle_id)
+    app.state.scheduled_pushes = ScheduledPushStore(settings.database_path)
     app.state.apns = APNSClient(settings)
     app.state.app_attest = AppAttestService(settings, app.state.store)
+    app.state.schedule_task = asyncio.create_task(run_scheduled_pushes(app))
     yield
+    app.state.schedule_task.cancel()
+    try:
+        await app.state.schedule_task
+    except asyncio.CancelledError:
+        pass
     await app.state.apns.close()
 
 
-app = FastAPI(title="APNs Live Activity Push-to-Start API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="APNs Live Activity Push-to-Start API", version="1.3.0", lifespan=lifespan)
 
 
 class RegisterToken(BaseModel):
@@ -60,6 +70,57 @@ class ActivityEvent(BaseModel):
     timestamp: int | None = None
     dismissal_date: int | None = None
     priority: Literal[5, 10] = 10
+
+class Recurrence(BaseModel):
+    frequency: Literal["daily", "weekly"]
+    timezone: str = Field(min_length=1, max_length=100)
+    interval: int = Field(default=1, ge=1, le=365)
+    weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
+    until: int | None = Field(default=None, gt=0)
+
+class ScheduledActivity(BaseModel):
+    schedule_id: str = Field(min_length=1, max_length=200)
+    user_id: str | None = Field(default=None, min_length=1, max_length=200)
+    bundle_id: str | None = Field(default=None, min_length=1, max_length=200)
+    environment: Literal["sandbox", "production"]
+    event: Literal["start", "update", "end"]
+    run_at: int = Field(gt=0)
+    recurrence: Recurrence | None = None
+    attributes_type: str | None = Field(default=None, min_length=1, max_length=200)
+    attributes: dict[str, Any] | None = None
+    content_state: dict[str, Any] | None = None
+    alert: dict[str, Any] | None = None
+    dismissal_date: int | None = Field(default=None, gt=0)
+    priority: Literal[5, 10] = 10
+
+    def validate_event(self) -> None:
+        if self.event == "start" and (any(value is None for value in
+                                           (self.attributes_type, self.attributes, self.content_state, self.alert))
+                                       or not self.alert):
+            raise HTTPException(status_code=422, detail="start requires attributes_type, attributes, content_state, and alert")
+        if self.event != "start" and self.content_state is None:
+            raise HTTPException(status_code=422, detail="update and end require content_state")
+        if self.recurrence:
+            if self.event == "end":
+                raise HTTPException(status_code=422, detail="end events cannot repeat")
+            if self.recurrence.frequency == "weekly" and not self.recurrence.weekdays:
+                raise HTTPException(status_code=422, detail="weekly recurrence requires weekdays")
+            if self.recurrence.weekdays and (any(day not in range(1, 8) for day in self.recurrence.weekdays)
+                                             or len(set(self.recurrence.weekdays)) != len(self.recurrence.weekdays)):
+                raise HTTPException(status_code=422, detail="weekdays must use ISO values 1 through 7")
+            if self.recurrence.frequency == "daily" and self.recurrence.weekdays:
+                raise HTTPException(status_code=422, detail="daily recurrence does not accept weekdays")
+            if self.recurrence.until is not None and self.recurrence.until < self.run_at:
+                raise HTTPException(status_code=422, detail="recurrence until must be at or after run_at")
+            try:
+                ZoneInfo(self.recurrence.timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="recurrence timezone must be a valid IANA timezone") from exc
+
+class ScheduleLookup(BaseModel):
+    schedule_id: str = Field(min_length=1, max_length=200)
+    user_id: str | None = Field(default=None, min_length=1, max_length=200)
+    bundle_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class AppAttestChallenge(BaseModel):
@@ -167,6 +228,62 @@ async def send_or_raise(client: APNSClient, token: str, environment: str, bundle
         raise HTTPException(status_code=502, detail="APNs request failed") from exc
 
 
+async def run_scheduled_pushes(app: FastAPI) -> None:
+    schedules: ScheduledPushStore = app.state.scheduled_pushes
+    tokens: TokenStore = app.state.store
+    client: APNSClient = app.state.apns
+    while True:
+        try:
+            jobs = schedules.claim_due(int(time.time()))
+        except Exception as exc:
+            logger.exception("Could not read scheduled ActivityKit events: %s", type(exc).__name__)
+            await asyncio.sleep(5)
+            continue
+        for job in jobs:
+            await send_scheduled_push(job, tokens, schedules, client)
+        await asyncio.sleep(1 if jobs else 5)
+
+
+async def send_scheduled_push(job: dict[str, Any], tokens: TokenStore,
+                              schedules: ScheduledPushStore, client: APNSClient) -> None:
+    try:
+        token_type = "push_to_start" if job["event"] == "start" else "activity"
+        token = token_for(tokens, job["user_id"], job["bundle_id"], token_type, job["environment"])
+        body = job["payload"]
+        aps: dict[str, Any] = {"event": job["event"]}
+        if job["event"] == "start":
+            aps.update({
+                "attributes-type": body["attributes_type"],
+                "attributes": body["attributes"],
+                "content-state": body["content_state"],
+                "alert": body["alert"],
+            })
+        else:
+            aps["content-state"] = body["content_state"]
+            if body.get("alert"):
+                aps["alert"] = body["alert"]
+            if job["event"] == "end" and body.get("dismissal_date") is not None:
+                aps["dismissal-date"] = body["dismissal_date"]
+        result = await send_or_raise(
+            client, token, job["environment"], job["bundle_id"], {"aps": aps},
+            job["event"], int(time.time()), job["priority"],
+        )
+        schedules.sent(job, result["apns_id"])
+    except HTTPException as exc:
+        if exc.status_code >= 500 or exc.status_code == 404:
+            schedules.retry(job, int(time.time()), f"HTTP {exc.status_code}")
+        else:
+            schedules.fail(job, int(time.time()), f"HTTP {exc.status_code}")
+    except Exception as exc:
+        logger.warning("Scheduled ActivityKit event failed id=%s error=%s",
+                       job["schedule_id"], type(exc).__name__)
+        schedules.retry(job, int(time.time()), type(exc).__name__)
+
+
+async def schedules_for(request: Request) -> ScheduledPushStore:
+    return request.app.state.scheduled_pushes
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -246,3 +363,55 @@ async def end_activity(body: ActivityEvent, request: Request, store: TokenStore 
         aps["dismissal-date"] = body.dismissal_date
     return await send_or_raise(client, token, body.environment, bundle_id, {"aps": aps}, "end",
                                current_timestamp(body.timestamp), body.priority)
+
+
+@app.put("/api/live-activity/schedules", dependencies=[Depends(authorize)])
+async def put_schedule(body: ScheduledActivity, request: Request,
+                       store: TokenStore = Depends(store_for),
+                       schedules: ScheduledPushStore = Depends(schedules_for)):
+    body.validate_event()
+    user_id = resolve_user_id(request, body.user_id)
+    bundle_id = resolve_bundle_id(request, body.bundle_id)
+    token_type = "push_to_start" if body.event == "start" else "activity"
+    token_for(store, user_id, bundle_id, token_type, body.environment)
+    payload = {
+        key: value for key, value in {
+            "attributes_type": body.attributes_type,
+            "attributes": body.attributes,
+            "content_state": body.content_state,
+            "alert": body.alert,
+            "dismissal_date": body.dismissal_date,
+        }.items() if value is not None
+    }
+    stored = schedules.put(
+        user_id, bundle_id, body.schedule_id, body.environment, body.event, body.run_at,
+        payload, body.recurrence.model_dump(exclude_none=True) if body.recurrence else None,
+        body.priority,
+    )
+    if not stored:
+        raise HTTPException(status_code=409, detail="schedule is currently being sent")
+    return {"schedule_id": body.schedule_id, "status": "scheduled", "run_at": body.run_at}
+
+
+@app.post("/api/live-activity/schedules/status", dependencies=[Depends(authorize)])
+async def get_schedule(body: ScheduleLookup, request: Request,
+                       schedules: ScheduledPushStore = Depends(schedules_for)):
+    user_id = resolve_user_id(request, body.user_id)
+    bundle_id = resolve_bundle_id(request, body.bundle_id)
+    schedule = schedules.get(user_id, bundle_id, body.schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    return schedule
+
+
+@app.post("/api/live-activity/schedules/cancel", dependencies=[Depends(authorize)])
+async def delete_schedule(body: ScheduleLookup, request: Request,
+                          schedules: ScheduledPushStore = Depends(schedules_for)):
+    user_id = resolve_user_id(request, body.user_id)
+    bundle_id = resolve_bundle_id(request, body.bundle_id)
+    result = schedules.cancel(user_id, bundle_id, body.schedule_id)
+    if result == "missing":
+        raise HTTPException(status_code=404, detail="schedule not found")
+    if result == "too_late":
+        raise HTTPException(status_code=409, detail="schedule is already being sent or has completed")
+    return {"schedule_id": body.schedule_id, "status": "cancelled"}
