@@ -26,8 +26,10 @@ async def request(app, method, path, **kwargs):
 def test_token_register_and_activity_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "tokens.db"))
     monkeypatch.setattr(main.settings, "api_key", "")
+    monkeypatch.setattr(main.settings, "apns_bundle_id", "com.example.test")
+    monkeypatch.setattr(main.settings, "additional_bundle_ids", "")
     async def run():
-        main.app.state.store = main.TokenStore(main.settings.database_path)
+        main.app.state.store = main.TokenStore(main.settings.database_path, main.settings.apns_bundle_id)
         fake = FakeAPNS()
         main.app.state.apns = fake
         token = "ab" * 32
@@ -54,8 +56,10 @@ def test_token_register_and_activity_lifecycle(tmp_path, monkeypatch):
 def test_environment_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "tokens.db"))
     monkeypatch.setattr(main.settings, "api_key", "")
+    monkeypatch.setattr(main.settings, "apns_bundle_id", "com.example.test")
+    monkeypatch.setattr(main.settings, "additional_bundle_ids", "")
     async def run():
-        main.app.state.store = main.TokenStore(main.settings.database_path)
+        main.app.state.store = main.TokenStore(main.settings.database_path, main.settings.apns_bundle_id)
         response = await request(main.app, "POST", "/api/live-activity/start", json={"user_id": "missing",
             "environment": "production", "attributes_type": "A", "attributes": {}, "content_state": {}})
         assert response.status_code == 404
@@ -88,9 +92,11 @@ def test_api_key_and_app_attest_can_both_register_tokens(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main.settings, "database_path", str(tmp_path / "dual-auth.db"))
     monkeypatch.setattr(main.settings, "api_key", "test-api-key")
+    monkeypatch.setattr(main.settings, "apns_bundle_id", "com.example.test")
+    monkeypatch.setattr(main.settings, "additional_bundle_ids", "")
 
     async def run():
-        store = main.TokenStore(main.settings.database_path)
+        store = main.TokenStore(main.settings.database_path, main.settings.apns_bundle_id)
         main.app.state.store = store
         main.app.state.app_attest = FakeAppAttest()
 

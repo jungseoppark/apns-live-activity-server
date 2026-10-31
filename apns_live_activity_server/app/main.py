@@ -240,39 +240,44 @@ async def run_scheduled_pushes(app: FastAPI) -> None:
             await asyncio.sleep(5)
             continue
         for job in jobs:
-            try:
-                token_type = "push_to_start" if job["event"] == "start" else "activity"
-                token = token_for(tokens, job["user_id"], job["bundle_id"], token_type, job["environment"])
-                body = job["payload"]
-                aps: dict[str, Any] = {"event": job["event"]}
-                if job["event"] == "start":
-                    aps.update({
-                        "attributes-type": body["attributes_type"],
-                        "attributes": body["attributes"],
-                        "content-state": body["content_state"],
-                        "alert": body["alert"],
-                    })
-                else:
-                    aps["content-state"] = body["content_state"]
-                    if body.get("alert"):
-                        aps["alert"] = body["alert"]
-                    if job["event"] == "end" and body.get("dismissal_date") is not None:
-                        aps["dismissal-date"] = body["dismissal_date"]
-                result = await send_or_raise(
-                    client, token, job["environment"], job["bundle_id"], {"aps": aps},
-                    job["event"], int(time.time()), job["priority"],
-                )
-                schedules.sent(job, result["apns_id"])
-            except HTTPException as exc:
-                if exc.status_code >= 500 or exc.status_code == 404:
-                    schedules.retry(job, int(time.time()), f"HTTP {exc.status_code}")
-                else:
-                    schedules.fail(job, int(time.time()), f"HTTP {exc.status_code}")
-            except Exception as exc:
-                logger.warning("Scheduled ActivityKit event failed id=%s error=%s",
-                               job["schedule_id"], type(exc).__name__)
-                schedules.retry(job, int(time.time()), type(exc).__name__)
+            await send_scheduled_push(job, tokens, schedules, client)
         await asyncio.sleep(1 if jobs else 5)
+
+
+async def send_scheduled_push(job: dict[str, Any], tokens: TokenStore,
+                              schedules: ScheduledPushStore, client: APNSClient) -> None:
+    try:
+        token_type = "push_to_start" if job["event"] == "start" else "activity"
+        token = token_for(tokens, job["user_id"], job["bundle_id"], token_type, job["environment"])
+        body = job["payload"]
+        aps: dict[str, Any] = {"event": job["event"]}
+        if job["event"] == "start":
+            aps.update({
+                "attributes-type": body["attributes_type"],
+                "attributes": body["attributes"],
+                "content-state": body["content_state"],
+                "alert": body["alert"],
+            })
+        else:
+            aps["content-state"] = body["content_state"]
+            if body.get("alert"):
+                aps["alert"] = body["alert"]
+            if job["event"] == "end" and body.get("dismissal_date") is not None:
+                aps["dismissal-date"] = body["dismissal_date"]
+        result = await send_or_raise(
+            client, token, job["environment"], job["bundle_id"], {"aps": aps},
+            job["event"], int(time.time()), job["priority"],
+        )
+        schedules.sent(job, result["apns_id"])
+    except HTTPException as exc:
+        if exc.status_code >= 500 or exc.status_code == 404:
+            schedules.retry(job, int(time.time()), f"HTTP {exc.status_code}")
+        else:
+            schedules.fail(job, int(time.time()), f"HTTP {exc.status_code}")
+    except Exception as exc:
+        logger.warning("Scheduled ActivityKit event failed id=%s error=%s",
+                       job["schedule_id"], type(exc).__name__)
+        schedules.retry(job, int(time.time()), type(exc).__name__)
 
 
 async def schedules_for(request: Request) -> ScheduledPushStore:
